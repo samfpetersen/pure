@@ -118,6 +118,16 @@ prompt_pure_set_colors() {
 	done
 }
 
+# string length ignoring ansi escapes
+prompt_pure_string_length_to_var() {
+	local str=$1 var=$2 length
+	# perform expansion on str and check length
+	length=$(( ${#${(S%%)str//(\%([KF1]|)\{*\}|\%[Bbkf])}} ))
+
+	# store string length in variable as specified by caller
+	typeset -g "${var}"="${length}"
+}
+
 prompt_pure_preprompt_render() {
 	setopt localoptions noshwordsplit
 
@@ -131,32 +141,47 @@ prompt_pure_preprompt_render() {
 	# Initialize the preprompt array.
 	local -a preprompt_parts
 
+	local -a preprompt_username
+
 	# Username and machine, if applicable.
-	[[ -n $prompt_pure_state[username] ]] && preprompt_parts+=($prompt_pure_state[username])
+	[[ -n $prompt_pure_state[username] ]] && preprompt_username+=($prompt_pure_state[username] $prompt_newline)
 
 	# Set the path.
 	preprompt_parts+=('%F{${prompt_pure_colors[path]}}%~%f')
 
+    local -a right_preprompt_parts
 	# Git branch and dirty status info.
 	typeset -gA prompt_pure_vcs_info
 	if [[ -n $prompt_pure_vcs_info[branch] ]]; then
-		preprompt_parts+=("%F{$git_color}"'${prompt_pure_vcs_info[branch]}'"%F{$git_dirty_color}"'${prompt_pure_git_dirty}%f')
+		right_preprompt_parts+=("%F{$git_color}"'${prompt_pure_vcs_info[branch]}'"%F{$git_dirty_color}"'${prompt_pure_git_dirty}%f')
 	fi
 	# Git action (for example, merge).
 	if [[ -n $prompt_pure_vcs_info[action] ]]; then
-		preprompt_parts+=("%F{$prompt_pure_colors[git:action]}"'$prompt_pure_vcs_info[action]%f')
+		right_preprompt_parts+=("%F{$prompt_pure_colors[git:action]}"'$prompt_pure_vcs_info[action]%f')
 	fi
 	# Git pull/push arrows.
 	if [[ -n $prompt_pure_git_arrows ]]; then
-		preprompt_parts+=('%F{$prompt_pure_colors[git:arrow]}${prompt_pure_git_arrows}%f')
+		right_preprompt_parts+=('%F{$prompt_pure_colors[git:arrow]}${prompt_pure_git_arrows}%f')
 	fi
 	# Git stash symbol (if opted in).
 	if [[ -n $prompt_pure_git_stash ]]; then
-		preprompt_parts+=('%F{$prompt_pure_colors[git:stash]}${PURE_GIT_STASH_SYMBOL:-≡}%f')
+		right_preprompt_parts+=('%F{$prompt_pure_colors[git:stash]}${PURE_GIT_STASH_SYMBOL:-≡}%f')
 	fi
 
 	# Execution time.
-	[[ -n $prompt_pure_cmd_exec_time ]] && preprompt_parts+=('%F{$prompt_pure_colors[execution_time]}${prompt_pure_cmd_exec_time}%f')
+	[[ -n $prompt_pure_cmd_exec_time ]] && right_preprompt_parts+=('%F{$prompt_pure_colors[execution_time]}${prompt_pure_cmd_exec_time}%f')
+
+    # current time
+    local preprompt=${(j. .)preprompt_parts}  # Join parts, space separated.
+	local right_preprompt=${(j. .)right_preprompt_parts}
+
+	integer preprompt_left_length preprompt_right_length space_length
+	prompt_pure_string_length_to_var "${preprompt}" "preprompt_left_length"
+	prompt_pure_string_length_to_var "${right_preprompt}" "preprompt_right_length"
+	(( space_length = COLUMNS - preprompt_left_length - preprompt_right_length ))
+
+	preprompt+="$(printf ' %.0s' {1..${space_length}})"
+	preprompt+=$right_preprompt
 
 	local cleaned_ps1=$PROMPT
 	local -H MATCH MBEGIN MEND
@@ -170,7 +195,8 @@ prompt_pure_preprompt_render() {
 	# Construct the new prompt with a clean preprompt.
 	local -ah ps1
 	ps1=(
-		${(j. .)preprompt_parts}  # Join parts, space separated.
+		${(j..)preprompt_username} # Username on a pre-preprompt line
+		$preprompt
 		$prompt_newline           # Separate preprompt and prompt.
 		$cleaned_ps1
 	)
